@@ -108,8 +108,9 @@ def load_connection_json(path: str)->tuple:
         path: a string containing the json settings file path
 
     Returns:
-        A ConnectionInfo object containing the specified settings
+       tuple(ConnectionInfo, SyncInfo)
     """
+    print()
     try:
         if path.rsplit('.', 1)[1] != 'json':
             print('File is not of type: JSON')
@@ -136,16 +137,27 @@ def load_connection_json(path: str)->tuple:
         SyncInfo(
             data['remote_root'],
             data['local_root'] if data['local_root'][-1] != '/' else data['local_root'].rsplit('/', 1)[0],
-            [('' if entry[:1] == '/' else '/') + entry + ('/' if entry[-1] == '/' else '')
-             for entry in data['blacklist']],
-            [('' if entry[:1] == '/' else '/') + entry + ('/' if entry[-1] == '/' else '')
-             for entry in data['whitelist']]
+            [standardize_slashes(entry) for entry in data['blacklist']],
+            [standardize_slashes(entry) for entry in data['whitelist']]
         )
     )
 
-def get_remote_files(ftp: ftplib.FTP, sync_info: SyncInfo)->dict[str, FileInfo]:
+def get_remote_files(ftp: ftplib.FTP, sync_info: SyncInfo, v: bool)->dict[str, FileInfo]:
+    """
+    Gets a list of all files on the remote server that exist in whitelisted paths.
+
+    Arguments:
+        ftp: A ftplib.FTP object connected to the remote server.
+        sync_info: A SyncInfo object
+        v: A boolean indicating whether or not to display additional information.
+
+    Returns:
+        dict[str, FileInfo] A dictionary with the file path as the key and a FileInfo object
+        as the entry.
+    """
     files: dict[str, FileInfo] = {}
     scan_list: list = ['']
+    print('Getting remote files...')
 
     if sync_info.whitelist:
         scan_list = []
@@ -163,6 +175,7 @@ def get_remote_files(ftp: ftplib.FTP, sync_info: SyncInfo)->dict[str, FileInfo]:
 
     for d in scan_list:
         # Set the working directory.
+        if v: print(f"Changing directory to: {d}")
         ftp.cwd(d)
 
         dir_files = ftp.mlsd(d, facts=['size', 'modify', 'type'])
@@ -174,6 +187,8 @@ def get_remote_files(ftp: ftplib.FTP, sync_info: SyncInfo)->dict[str, FileInfo]:
             # or blacklisted.
             if (f_info['type'] not in {'file', 'dir'}) or (f_path in sync_info.blacklist):
                 continue
+
+            if v: print(f"Found: {f_path}")
             # If the entry is a directory, add it to the scan list.
             f_is_dir: bool = False
             if ('dir' == f_info['type']):
@@ -186,9 +201,21 @@ def get_remote_files(ftp: ftplib.FTP, sync_info: SyncInfo)->dict[str, FileInfo]:
     ftp.cwd('/')
     return files
 
-def get_local_files(sync_info: SyncInfo)->dict[str, FileInfo]:
+def get_local_files(sync_info: SyncInfo, v: bool)->dict[str, FileInfo]:
+    """
+    Gets a list of all local files that exist in whitelisted paths.
+
+    Arguments:
+        sync_info: A SyncInfo object
+        v: A boolean indicating whether or not to display additional information.
+
+    Returns:
+        dict[str, FileInfo] A dictionary with the file path as the key and a FileInfo object
+        as the entry.
+    """
     files: dict[str, FileInfo] = {}
     scan_list: list = [sync_info.local_root]
+    print("Getting local files...")
 
     if sync_info.whitelist:
         scan_list = []
@@ -199,6 +226,7 @@ def get_local_files(sync_info: SyncInfo)->dict[str, FileInfo]:
                 scan_list.append(d)
         
     for d in scan_list:
+        if v: print(f"Changing directory to: {d}")
         results = os.scandir(d)
 
         for entry in results:
@@ -211,6 +239,7 @@ def get_local_files(sync_info: SyncInfo)->dict[str, FileInfo]:
             if not entry.is_file() and not entry.is_dir():
                 continue
 
+            if v: print(f"Found: {rel_path}")
             is_dir: bool = False
             if entry.is_dir():
                 is_dir = True
@@ -220,8 +249,16 @@ def get_local_files(sync_info: SyncInfo)->dict[str, FileInfo]:
             files[rel_path] = FileInfo(rel_path, entry.name, stat.st_mtime, stat.st_size, is_dir)
     return files
 
+def standardize_slashes( path: str )->str:
+    # TODO add windows support.
+    return ('' if path[:1] == '/' else '/') + path + ('/' if path[-1] == '/' else '')
+
 def sort_by_dir_level(x):
     return x.count('/')
+
+def write_summary(text: str)->None:
+    with open("summary.txt", "w") as f:
+        f.write(text)
 
 def format_list_to_str(l: list)->str:
     output: str = ""
@@ -230,19 +267,24 @@ def format_list_to_str(l: list)->str:
     return output
 
 def sync(args)->None:
-    info = load_connection_json(args.connection_json)
+    v: bool = args.verbose
+    info = load_connection_json(args.connection_json)    
     con_info: ConnectionInfo = info[0]
+
+    if args.password:
+        con_info.pswd = args.password
+    
     sync_info: SyncInfo = info[1]
     ftp: ftplib.FTP = connect(con_info, sync_info.remote_root)
 
     # Apply any commandline overrides
     if args.blacklist:
-        sync.blacklist = args.blacklist.split(',')
+        sync_info.blacklist = [standardize_slashes(entry) for entry in args.blacklist.split(',')]
     if args.whitelist:
-        sync.whitelist = args.whitelist.split(',')
+        sync_info.whitelist = [standardize_slashes(entry) for entry in args.whitelist.split(',')]
 
-    r_files: dict[str, FileInfo] = get_remote_files(ftp, sync_info)
-    l_files: dict[str, FileInfo] = get_local_files(sync_info)
+    r_files: dict[str, FileInfo] = get_remote_files(ftp, sync_info, v)
+    l_files: dict[str, FileInfo] = get_local_files(sync_info, v)
     
     f_to_down: dict[str, int] = {}
     f_to_del: list[str] = []
@@ -291,6 +333,7 @@ def sync(args)->None:
 
     if not f_to_down and not f_to_del and not d_to_down and not d_to_del:
         print("Everything is up to date!")
+        write_summary("No changes")
         sys.exit()
 
     # Sort all the lists by how deep they are in the file structure.
@@ -309,9 +352,8 @@ def sync(args)->None:
     summary += "\n--- == Deletions == ---"
     summary += format_list_to_str(f_to_del)
     summary += format_list_to_str(d_to_del)
-    
-    with open("summary.txt", "w") as f:
-        f.write(summary)
+
+    write_summary(summary)
 
     # Ask for confirmation if the --no-confirm flag isn't set.
     if not args.no_confirm:
@@ -320,11 +362,13 @@ def sync(args)->None:
             print("Sync canceled")
             sys.exit()
 
+    if v: print("Deleting marked files and directories...")
     # Delete marked files...
     for f in f_to_del:
         path = sync_info.local_root + f
         try:
             os.remove(path)
+            if v: print(f"Deleted file: {path}")
         except:
             print(f"Error deleting file: {path}")
 
@@ -333,6 +377,7 @@ def sync(args)->None:
         path = sync_info.local_root + d
         try:
             os.rmdir(path)
+            if v: print(f"Deleted dir: {path}")
         except:
             print(f"Error deleting directory: {path}")
 
@@ -341,6 +386,7 @@ def sync(args)->None:
         path = sync_info.local_root + d
         try:
             os.mkdir(path)
+            if v: print(f"Created dir: {path}")
         except:
             print(f"Error creating directory: {path}")
 
@@ -354,6 +400,7 @@ def sync(args)->None:
             with open(path, 'wb') as open_file:
                 ftp.retrbinary(f"RETR {r_path}", open_file.write)
             os.utime(path, (os.stat(path).st_atime, int(f_to_down[f])))
+            if v: print(f"Downloaded file: {path}")
         except:
             print(f"Error downloading: {path}")
 
@@ -363,11 +410,12 @@ def sync(args)->None:
 # Parser for command line args
 parser = argparse.ArgumentParser(prog='ftp_fetch')
 parser.add_argument('connection_json', metavar='connection-json', type=str, help='path to the connection info json file')
-parser.add_argument('-wl', '--whitelist', type=str, default='none', help='overwrite the config whitelist, should be a comma seperated list')
-parser.add_argument('-bl', '--blacklist', type=str, default='none', help='overwrite the config blacklist, should be a comma seperated list')
-parser.add_argument('-dk', '--decrypt-key', type=str, default='none', help='key to decrypt the password field')
+parser.add_argument('-wl', '--whitelist', type=str, default=None, help='overwrite the config whitelist, should be a comma seperated list')
+parser.add_argument('-bl', '--blacklist', type=str, default=None, help='overwrite the config blacklist, should be a comma seperated list')
+parser.add_argument('-p', '--password', type=str, default=None, help='overwrite the user password in the config')
 parser.add_argument('-nc', '--no-confirm', action='store_true', help='skip the preview changes step')
-parser.set_defaults(func=sync )
+parser.add_argument('-v', '--verbose', action='store_true', help='display more info about what the program is doing')
+parser.set_defaults(func=sync)
 
 args = parser.parse_args()
 if hasattr(args, 'func'):
