@@ -62,41 +62,39 @@ class SyncInfo:
         self.blacklist = blacklist
         self.whitelist = whitelist
 
-def connect(con_info: ConnectionInfo, remote_root: str)->ftplib.FTP:
+def is_windows():
+    return True if os.name == 'nt' else False
+
+def sort_by_dir_level(x: str):
+    return x.count('/')
+
+def write_summary(text: str)->None:
+    with open("summary.txt", "w") as f:
+        f.write(text)
+
+def format_list_to_str(l: list)->str:
+    output: str = ""
+    for i in l:
+        output += f"\n{i}"
+    return output
+
+def standardize_slashes(path: str, beginning_slash: bool = True)->str:
     """
-    Connects to the FTP server.
+    Makes sure `path`s first character is a slash and the last one isn't a slash.
 
     Arguments:
-        con_info: a ConnectionInfo object
-
-    Returns:
-        A ftplib.FTP object connected to the server.
+        path: A string with the path to check.
+        beginning_slash: A boolean indicating if the beginning slash should be
+            added or not. Exists so a slash doesn't get added before the drive
+            letter on Windows.
     """
-    ftp: ftplib.FTP = ftplib.FTP_TLS() if (con_info.tls) else ftplib.FTP()
-    ftp.set_debuglevel(0)
-    print(f'Connecting to {con_info.host} on port {con_info.port}...')
+    if not path:
+        return ''
+    if beginning_slash:
+        path = ('' if path[:1] == '/' else '/') + path
+    return path.rsplit('/', 1) if path[-1] == '/' else path
 
-    try:
-        ftp.connect(con_info.host, con_info.port, con_info.timeout)
-        print('Connection successful!')
-    except:
-        print('Connection Failed!\nPlease make sure your settings are correct and the server is running.')
-        sys.exit()
-
-    print(f'Logging in as {con_info.user} with the provided password...')
-    try:
-        ftp.login(con_info.user, con_info.pswd)
-        print('Login successful!')
-    except:
-        print('Login failed!\nPlease make sure the login details are correct.')
-        sys.exit()
-
-    if con_info.tls:
-        ftp.prot_p()
-
-    return ftp
-
-def load_connection_settings(args, is_win: bool = False)->tuple:
+def load_connection_settings(args)->tuple:
     """
     Loads the connection settings
 
@@ -143,11 +141,45 @@ def load_connection_settings(args, is_win: bool = False)->tuple:
         ),
         SyncInfo(
             standardize_slashes(data['remote_root']),
-            standardize_slashes(data['local_root'], '\\' if is_win else '/'),
+            standardize_slashes(data['local_root'], not is_windows()),
             blacklist,
             whitelist
         )
     )
+
+def connect(con_info: ConnectionInfo, remote_root: str)->ftplib.FTP:
+    """
+    Connects to the FTP server.
+
+    Arguments:
+        con_info: a ConnectionInfo object
+
+    Returns:
+        A ftplib.FTP object connected to the server.
+    """
+    ftp: ftplib.FTP = ftplib.FTP_TLS() if (con_info.tls) else ftplib.FTP()
+    ftp.set_debuglevel(0)
+    print(f'Connecting to {con_info.host} on port {con_info.port}...')
+
+    try:
+        ftp.connect(con_info.host, con_info.port, con_info.timeout)
+        print('Connection successful!')
+    except:
+        print('Connection Failed!\nPlease make sure your settings are correct and the server is running.')
+        sys.exit()
+
+    print(f'Logging in as {con_info.user} with the provided password...')
+    try:
+        ftp.login(con_info.user, con_info.pswd)
+        print('Login successful!')
+    except:
+        print('Login failed!\nPlease make sure the login details are correct.')
+        sys.exit()
+
+    if con_info.tls:
+        ftp.prot_p()
+
+    return ftp
 
 def get_remote_files(ftp: ftplib.FTP, sync_info: SyncInfo, v: bool)->dict[str, FileInfo]:
     """
@@ -211,7 +243,7 @@ def get_remote_files(ftp: ftplib.FTP, sync_info: SyncInfo, v: bool)->dict[str, F
     ftp.cwd(sync_info.remote_root)
     return files
 
-def get_local_files(sync_info: SyncInfo, is_win: bool = False, v: bool = False)->dict[str, FileInfo]:
+def get_local_files(sync_info: SyncInfo, v: bool = False)->dict[str, FileInfo]:
     """
     Gets a list of all local files that exist in whitelisted paths.
 
@@ -261,38 +293,15 @@ def get_local_files(sync_info: SyncInfo, is_win: bool = False, v: bool = False)-
             files[rel_path] = FileInfo(entry.path, rel_path, entry.name, stat.st_mtime, stat.st_size, is_dir)
     return files
 
-def standardize_slashes(path: str, slash: str = '/')->str:
-    """
-    Makes sure `path`s first character is a slash and the last one isn't a slash.
-    """
-    if not path:
-        return ''
-    path = ('' if path[:1] == slash else slash) + path
-    return path.rsplit(slash, 1) if path[-1] == slash else path
-
-def sort_by_dir_level(x, slash: str = '/'):
-    return x.count(slash)
-
-def write_summary(text: str)->None:
-    with open("summary.txt", "w") as f:
-        f.write(text)
-
-def format_list_to_str(l: list)->str:
-    output: str = ""
-    for i in l:
-        output += f"\n{i}"
-    return output
-
 def sync(args)->None:
     v: bool = args.verbose
-    is_win: bool = (os.name == 'nt')
-    info = load_connection_settings(args, is_win)
+    info = load_connection_settings(args)
     con_info: ConnectionInfo = info[0]
     sync_info: SyncInfo = info[1]
     ftp: ftplib.FTP = connect(con_info, sync_info.remote_root)
 
     r_files: dict[str, FileInfo] = get_remote_files(ftp, sync_info, v)
-    l_files: dict[str, FileInfo] = get_local_files(sync_info, is_win, v)
+    l_files: dict[str, FileInfo] = get_local_files(sync_info, v)
     
     f_to_down: dict[str, int] = {}
     f_to_del: list[str] = []
@@ -365,9 +374,6 @@ def sync(args)->None:
 
     write_summary(summary)
 
-    print(r_files)
-    print(l_files)
-
     # Ask for confirmation if the --no-confirm flag isn't set.
     if not args.no_confirm:
         print("Would you like to apply the changes in summary.txt? (y)es/(n)o")
@@ -409,7 +415,7 @@ def sync(args)->None:
 
     # Download marked files...
     for f in f_to_down:
-        path = sync_info.local_root + (f if not is_win else f.replace('/', '\\'))
+        path = sync_info.local_root + f
         r_path = r_files[f].path
         try:
             # Download the file
