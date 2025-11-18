@@ -36,12 +36,14 @@ class FileInfo:
     def __init__(
         self,
         path: str,
+        display_path: str,
         name: str,
         m_date: int = 0,
         size: int = 0,
         is_dir: bool = False
     ):
         self.path = path
+        self.display_path = display_path
         self.name = name
         self.m_date = m_date
         self.size = int(size)
@@ -92,25 +94,19 @@ def connect(con_info: ConnectionInfo, remote_root: str)->ftplib.FTP:
     if con_info.tls:
         ftp.prot_p()
 
-    try:
-        ftp.cwd(remote_root)
-    except:
-        print(f'The directory `{remote_root}` doesn\'t exist on the server!')
-        sys.exit()
-
     return ftp
 
-def load_connection_json(path: str)->tuple:
+def load_connection_settings(args)->tuple:
     """
     Loads the connection settings
 
     Arguments:
-        path: a string containing the json settings file path
+        args: Arguments from the command line
 
     Returns:
        tuple(ConnectionInfo, SyncInfo)
     """
-    print()
+    path: str = args.connection_json
     try:
         if path.rsplit('.', 1)[1] != 'json':
             print('File is not of type: JSON')
@@ -124,21 +120,32 @@ def load_connection_json(path: str)->tuple:
         if 'f' in locals():
             f.close()
 
+    # Apply any commandline overrides
+    if args.blacklist:
+        blacklist = [standardize_slashes(entry) for entry in args.blacklist.split(',')]
+    else:
+        blacklist = [standardize_slashes(entry) for entry in data['blacklist']]
+
+    if args.whitelist:
+        whitelist = [standardize_slashes(entry) for entry in args.whitelist.split(',')]
+    else:
+        whitelist = [standardize_slashes(entry) for entry in data['whitelist']]
+
     rc_data = data['remote_connection']
     return (
         ConnectionInfo(
             rc_data['host'],
             rc_data['user'],
-            rc_data['password'],
+            args.password or rc_data['password'],
             rc_data['tls'],
             rc_data['port'],
             rc_data['timeout'],
         ),
         SyncInfo(
-            data['remote_root'],
-            data['local_root'] if data['local_root'][-1] != '/' else data['local_root'].rsplit('/', 1)[0],
-            [standardize_slashes(entry) for entry in data['blacklist']],
-            [standardize_slashes(entry) for entry in data['whitelist']]
+            standardize_slashes(data['remote_root']),
+            standardize_slashes(data['local_root']),
+            blacklist,
+            whitelist
         )
     )
 
@@ -168,10 +175,12 @@ def get_remote_files(ftp: ftplib.FTP, sync_info: SyncInfo, v: bool)->dict[str, F
             except:
                 print(f"WARNING: {d} doesn't exist on the remote server!")
                 continue
-            files[d] = FileInfo(d, d.rsplit('/', 1)[1], 0, 0, True)
+            files[d] = FileInfo(d, d.replace(sync_info.remote_root, ''), d.rsplit('/', 1)[1], 0, 0, True)
             scan_list.append(d)
             # Return to the root directory.
-            ftp.cwd('/')
+            ftp.cwd(sync_info.remote_root)
+
+    scan_list = [sync_info.remote_root + d for d in scan_list]
 
     for d in scan_list:
         # Set the working directory.
@@ -181,14 +190,15 @@ def get_remote_files(ftp: ftplib.FTP, sync_info: SyncInfo, v: bool)->dict[str, F
         dir_files = ftp.mlsd(d, facts=['size', 'modify', 'type'])
         for f in dir_files:
             f_path: str = f"{d}/{f[0]}"
+            rel_path: str = f_path.replace(sync_info.remote_root, '')
             f_info: dict = f[1]
 
             # Skip the entry if it's not a normal file or directory
             # or blacklisted.
-            if (f_info['type'] not in {'file', 'dir'}) or (f_path in sync_info.blacklist):
+            if (f_info['type'] not in {'file', 'dir'}) or (rel_path in sync_info.blacklist):
                 continue
 
-            if v: print(f"Found: {f_path}")
+            if v: print(f"Found: {rel_path}")
             # If the entry is a directory, add it to the scan list.
             f_is_dir: bool = False
             if ('dir' == f_info['type']):
@@ -196,17 +206,18 @@ def get_remote_files(ftp: ftplib.FTP, sync_info: SyncInfo, v: bool)->dict[str, F
                 f_is_dir = True
 
             m_time = time.mktime(datetime.strptime(str(f_info['modify']), '%Y%m%d%H%M%S').timetuple())
-            files[f_path] = FileInfo(f_path, f[0], m_time, f_info.get('size', 0), f_is_dir)
+            files[rel_path] = FileInfo(f_path, rel_path, f[0], m_time, f_info.get('size', 0), f_is_dir)
     # Return to the root directory.
-    ftp.cwd('/')
+    ftp.cwd(sync_info.remote_root)
     return files
 
-def get_local_files(sync_info: SyncInfo, v: bool)->dict[str, FileInfo]:
+def get_local_files(sync_info: SyncInfo, is_win: bool = False, v: bool = False)->dict[str, FileInfo]:
     """
     Gets a list of all local files that exist in whitelisted paths.
 
     Arguments:
         sync_info: A SyncInfo object
+        is_win: A boolean indicating whether or not the program is running on a Windows machine.
         v: A boolean indicating whether or not to display additional information.
 
     Returns:
@@ -222,7 +233,7 @@ def get_local_files(sync_info: SyncInfo, v: bool)->dict[str, FileInfo]:
         # Only add whitelist entries if the exist.
         for d in scan_list:
             if os.path.exists(d):
-                files[d] = FileInfo(d.replace(sync_info.local_root, ''), d.rsplit('/', 1)[1], 0, 0, True)
+                files[d] = FileInfo(d, d.replace(sync_info.local_root, ''), d.rsplit('/', 1)[1], 0, 0, True)
                 scan_list.append(d)
         
     for d in scan_list:
@@ -230,7 +241,8 @@ def get_local_files(sync_info: SyncInfo, v: bool)->dict[str, FileInfo]:
         results = os.scandir(d)
 
         for entry in results:
-            rel_path = entry.path.replace(sync_info.local_root, '')
+            # Remove the local and backslashes (for Windows) so the path matches the remote one.
+            rel_path = entry.path.replace(sync_info.local_root, '').replace('\\', '/')
             # Ignore blacklisted paths.
             if rel_path in sync_info.blacklist:
                 continue
@@ -246,15 +258,20 @@ def get_local_files(sync_info: SyncInfo, v: bool)->dict[str, FileInfo]:
                 scan_list.append(entry.path)
 
             stat = entry.stat(follow_symlinks=False)
-            files[rel_path] = FileInfo(rel_path, entry.name, stat.st_mtime, stat.st_size, is_dir)
+            files[rel_path] = FileInfo(entry.path, rel_path, entry.name, stat.st_mtime, stat.st_size, is_dir)
     return files
 
-def standardize_slashes( path: str )->str:
-    # TODO add windows support.
-    return ('' if path[:1] == '/' else '/') + path + ('/' if path[-1] == '/' else '')
+def standardize_slashes(path: str, slash: str = '/')->str:
+    """
+    Makes sure `path`s first character is a slash and the last one isn't a slash.
+    """
+    if not path:
+        return ''
+    path = ('' if path[:1] == slash else slash) + path
+    return path.rsplit(slash, 1) if path[-1] == slash else path
 
-def sort_by_dir_level(x):
-    return x.count('/')
+def sort_by_dir_level(x, slash: str = '/'):
+    return x.count(slash)
 
 def write_summary(text: str)->None:
     with open("summary.txt", "w") as f:
@@ -268,29 +285,20 @@ def format_list_to_str(l: list)->str:
 
 def sync(args)->None:
     v: bool = args.verbose
-    info = load_connection_json(args.connection_json)    
+    is_win: bool = (os.name == 'nt')
+    info = load_connection_settings(args)
     con_info: ConnectionInfo = info[0]
-
-    if args.password:
-        con_info.pswd = args.password
-    
     sync_info: SyncInfo = info[1]
     ftp: ftplib.FTP = connect(con_info, sync_info.remote_root)
 
-    # Apply any commandline overrides
-    if args.blacklist:
-        sync_info.blacklist = [standardize_slashes(entry) for entry in args.blacklist.split(',')]
-    if args.whitelist:
-        sync_info.whitelist = [standardize_slashes(entry) for entry in args.whitelist.split(',')]
-
     r_files: dict[str, FileInfo] = get_remote_files(ftp, sync_info, v)
-    l_files: dict[str, FileInfo] = get_local_files(sync_info, v)
+    l_files: dict[str, FileInfo] = get_local_files(sync_info, is_win, v)
     
     f_to_down: dict[str, int] = {}
     f_to_del: list[str] = []
     d_to_down: list[str] = []
     d_to_del: list[str] = []
-
+    
     if r_files:
         # Loop through all the remote files and set any
         # files that only exist on the remote server or
@@ -346,7 +354,9 @@ def sync(args)->None:
 
     # Output the summary to a text file and ask for confirmation
     # before doing anything with the files.
-    summary: str = "--- == Downloads == ---"
+    down_total: int = len(f_to_down) + len(d_to_down)
+    summary: str = f"Downloads: {down_total}   Deletions: {len(f_to_del) + len(d_to_del)}\n"
+    summary += "--- == Downloads == ---"
     summary += format_list_to_str(d_to_down)
     summary += format_list_to_str(f_to_down)
     summary += "\n--- == Deletions == ---"
@@ -354,6 +364,9 @@ def sync(args)->None:
     summary += format_list_to_str(d_to_del)
 
     write_summary(summary)
+
+    print(r_files)
+    print(l_files)
 
     # Ask for confirmation if the --no-confirm flag isn't set.
     if not args.no_confirm:
@@ -365,7 +378,7 @@ def sync(args)->None:
     if v: print("Deleting marked files and directories...")
     # Delete marked files...
     for f in f_to_del:
-        path = sync_info.local_root + f
+        path = sync_info.local_root + d
         try:
             os.remove(path)
             if v: print(f"Deleted file: {path}")
@@ -381,6 +394,7 @@ def sync(args)->None:
         except:
             print(f"Error deleting directory: {path}")
 
+    i: int = 1
     # Create marked directories...
     for d in d_to_down:
         path = sync_info.local_root + d
@@ -389,23 +403,27 @@ def sync(args)->None:
             if v: print(f"Created dir: {path}")
         except:
             print(f"Error creating directory: {path}")
+        
+        print(f"\rDownloading file {i} of {down_total}", end='', flush=True)
+        i += 1
 
     # Download marked files...
     for f in f_to_down:
-        path = sync_info.local_root + f
-        r_path = sync_info.remote_root + f
-
+        path = sync_info.local_root + (f if not is_win else f.replace('/', '\\'))
+        r_path = r_files[f].path
         try:
             # Download the file
             with open(path, 'wb') as open_file:
                 ftp.retrbinary(f"RETR {r_path}", open_file.write)
             os.utime(path, (os.stat(path).st_atime, int(f_to_down[f])))
-            if v: print(f"Downloaded file: {path}")
+            if v: print(f"\nDownloaded file: {path}")
         except:
-            print(f"Error downloading: {path}")
+            print(f"\nError downloading: {r_path}")
+        print(f"\rDownloading file {i} of {down_total}", end='', flush=True)
+        i += 1
 
     ftp.quit()
-    print("Sync finished")
+    print("\nSync finished")
 
 # Parser for command line args
 parser = argparse.ArgumentParser(prog='ftp_fetch')

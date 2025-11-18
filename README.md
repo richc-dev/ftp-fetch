@@ -1,8 +1,9 @@
 # FTP Fetch
-A commandline utility to get and update files from a FTP server.
+A simple commandline utility to update local files so they match the files on a remote server via FTP.
 
 # Requirements
-Python 3.13 or greater
+Python 3.13 or greater.
+The server being connected to must be running GNU/Linux and support the MLSD command.
 
 # Usage
 FTP Fetch uses JSON files in the following format to store the connection data:
@@ -28,6 +29,7 @@ FTP Fetch uses JSON files in the following format to store the connection data:
 }
 ```
 ### Notes:
+On Windows, use forward slashs (`/`) for all paths except `local_root`.
 All the entries are required, but can be emtpy values.
 The whitelist only works with directories, not files.
 It doesn't matter whether you include starting or trailing slashes, the program will take care of that for you.
