@@ -96,7 +96,7 @@ def connect(con_info: ConnectionInfo, remote_root: str)->ftplib.FTP:
 
     return ftp
 
-def load_connection_settings(args)->tuple:
+def load_connection_settings(args, is_win: bool = False)->tuple:
     """
     Loads the connection settings
 
@@ -143,7 +143,7 @@ def load_connection_settings(args)->tuple:
         ),
         SyncInfo(
             standardize_slashes(data['remote_root']),
-            standardize_slashes(data['local_root']),
+            standardize_slashes(data['local_root'], '\\' if is_win else '/'),
             blacklist,
             whitelist
         )
@@ -286,7 +286,7 @@ def format_list_to_str(l: list)->str:
 def sync(args)->None:
     v: bool = args.verbose
     is_win: bool = (os.name == 'nt')
-    info = load_connection_settings(args)
+    info = load_connection_settings(args, is_win)
     con_info: ConnectionInfo = info[0]
     sync_info: SyncInfo = info[1]
     ftp: ftplib.FTP = connect(con_info, sync_info.remote_root)
