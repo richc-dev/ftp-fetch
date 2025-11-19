@@ -415,7 +415,7 @@ def sync(args)->None:
     if v: print("Deleting marked files and directories...")
     # Delete marked files...
     for f in f_to_del:
-        path = sync_info.local_root + d
+        path = sync_info.local_root + f
         try:
             os.remove(path)
             if v: print(f"Deleted file: {path}")
@@ -437,9 +437,9 @@ def sync(args)->None:
         path = sync_info.local_root + d
         try:
             os.mkdir(path)
-            if v: print(f"Created dir: {path}")
+            if v: print(f"\rCreated dir: {path}")
         except:
-            print(f"Error creating directory: {path}")
+            print(f"\rError creating directory: {path}")
         
         print(f"\rDownloading file {i} of {down_total}", end='', flush=True)
         i += 1
