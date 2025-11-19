@@ -224,13 +224,14 @@ def get_remote_files(ftp: ftplib.FTP, sync_info: SyncInfo, v: bool)->dict[str, F
         scan_list = []
         # Only add whitelist entries if they exist.
         for d in sync_info.whitelist:
+            path = sync_info.remote_root + d
             try:
-                ftp.cwd(d)
+                ftp.cwd(path)
             except:
-                print(f"WARNING: {d} doesn't exist on the remote server!")
+                print(f"WARNING: {path} doesn't exist on the remote server!")
                 continue
-            files[d] = FileInfo(d, d.replace(sync_info.remote_root, ''), d.rsplit('/', 1)[1], 0, 0, True)
-            scan_list.append(sync_info.remote_root + d)
+            files[d] = FileInfo(d, d.rsplit('/', 1)[1], 0, 0, True)
+            scan_list.append(path)
 
     for d in scan_list:
         # Set the working directory.
@@ -259,7 +260,7 @@ def get_remote_files(ftp: ftplib.FTP, sync_info: SyncInfo, v: bool)->dict[str, F
             # Get the modified date.
             m_time = time.mktime(datetime.strptime(str(f_info['modify']), '%Y%m%d%H%M%S').timetuple())
             # Add the file to the file list.
-            files[rel_path] = FileInfo(f_path, rel_path, f[0], m_time, f_info.get('size', 0), f_is_dir)
+            files[rel_path] = FileInfo(f_path, f[0], m_time, f_info.get('size', 0), f_is_dir)
     # Return to the root directory.
     ftp.cwd(sync_info.remote_root)
     
@@ -284,11 +285,12 @@ def get_local_files(sync_info: SyncInfo, v: bool = False)->dict[str, FileInfo]:
 
     if sync_info.whitelist:
         scan_list = []
-        # Only add whitelist entries if the exist.
-        for d in scan_list:
-            if os.path.exists(d):
-                files[d] = FileInfo(d, d.replace(sync_info.local_root, ''), d.rsplit('/', 1)[1], 0, 0, True)
-                scan_list.append(d)
+        # Only add whitelist entries if they exist.
+        for d in sync_info.whitelist:
+            path = sync_info.local_root + d
+            if os.path.exists(path):
+                files[d] = FileInfo(d, d.rsplit('/', 1)[1], 0, 0, True)
+                scan_list.append(path)
         
     for d in scan_list:
         if v: print(f"Changing directory to: {d}")
@@ -316,7 +318,7 @@ def get_local_files(sync_info: SyncInfo, v: bool = False)->dict[str, FileInfo]:
             # Get the file info.
             stat = entry.stat(follow_symlinks=False)
             # Add the file info to the file list.
-            files[rel_path] = FileInfo(entry.path, rel_path, entry.name, stat.st_mtime, stat.st_size, is_dir)
+            files[rel_path] = FileInfo(entry.path, entry.name, stat.st_mtime, stat.st_size, is_dir)
     return files
 
 def sync(args)->None:
@@ -452,6 +454,7 @@ def sync(args)->None:
             # Download the file
             with open(path, 'wb') as open_file:
                 ftp.retrbinary(f"RETR {r_path}", open_file.write)
+            # Set the last modified date to match the remote file.
             os.utime(path, (os.stat(path).st_atime, int(f_to_down[f])))
             if v: print(f"\nDownloaded file: {path}")
         except:
