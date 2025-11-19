@@ -26,7 +26,6 @@
 
 import argparse
 import copy
-#import cryptography
 from datetime import datetime
 import ftplib
 import json
@@ -55,14 +54,12 @@ class FileInfo:
     def __init__(
         self,
         path: str,
-        display_path: str,
         name: str,
         m_date: int = 0,
         size: int = 0,
         is_dir: bool = False
     ):
         self.path = path
-        self.display_path = display_path
         self.name = name
         self.m_date = m_date
         self.size = int(size)
@@ -84,14 +81,16 @@ class SyncInfo:
 def is_windows():
     return True if os.name == 'nt' else False
 
-def sort_by_dir_level(x: str):
+def get_dir_level(x: str):
     return x.count('/')
 
 def write_summary(text: str)->None:
+    """ Write to summary.txt. """
     with open("summary.txt", "w") as f:
         f.write(text)
 
 def format_list_to_str(l: list)->str:
+    """ Output each list item on a new line. """
     output: str = ""
     for i in l:
         output += f"\n{i}"
@@ -106,6 +105,9 @@ def standardize_slashes(path: str, beginning_slash: bool = True)->str:
         beginning_slash: A boolean indicating if the beginning slash should be
             added or not. Exists so a slash doesn't get added before the drive
             letter on Windows.
+
+    Return:
+        A string containing the modified path.
     """
     if not path:
         return ''
@@ -125,6 +127,7 @@ def load_connection_settings(args)->tuple:
     """
     path: str = args.connection_json
     try:
+        # Make sure the file is a json file.
         if path.rsplit('.', 1)[1] != 'json':
             print('File is not of type: JSON')
             raise Exception()
@@ -137,7 +140,7 @@ def load_connection_settings(args)->tuple:
         if 'f' in locals():
             f.close()
 
-    # Apply any commandline overrides
+    # Apply commandline overrides for the whitelist and blacklist.
     if args.blacklist:
         blacklist = [standardize_slashes(entry) for entry in args.blacklist.split(',')]
     else:
@@ -166,12 +169,12 @@ def load_connection_settings(args)->tuple:
         )
     )
 
-def connect(con_info: ConnectionInfo, remote_root: str)->ftplib.FTP:
+def connect(con_info: ConnectionInfo)->ftplib.FTP:
     """
     Connects to the FTP server.
 
     Arguments:
-        con_info: a ConnectionInfo object
+        con_info: A ConnectionInfo object
 
     Returns:
         A ftplib.FTP object connected to the server.
@@ -214,7 +217,7 @@ def get_remote_files(ftp: ftplib.FTP, sync_info: SyncInfo, v: bool)->dict[str, F
         as the entry.
     """
     files: dict[str, FileInfo] = {}
-    scan_list: list = ['']
+    scan_list: list = [sync_info.remote_root]
     print('Getting remote files...')
 
     if sync_info.whitelist:
@@ -227,25 +230,22 @@ def get_remote_files(ftp: ftplib.FTP, sync_info: SyncInfo, v: bool)->dict[str, F
                 print(f"WARNING: {d} doesn't exist on the remote server!")
                 continue
             files[d] = FileInfo(d, d.replace(sync_info.remote_root, ''), d.rsplit('/', 1)[1], 0, 0, True)
-            scan_list.append(d)
-            # Return to the root directory.
-            ftp.cwd(sync_info.remote_root)
-
-    scan_list = [sync_info.remote_root + d for d in scan_list]
+            scan_list.append(sync_info.remote_root + d)
 
     for d in scan_list:
         # Set the working directory.
         if v: print(f"Changing directory to: {d}")
         ftp.cwd(d)
 
+        # Get the files in the directory.
         dir_files = ftp.mlsd(d, facts=['size', 'modify', 'type'])
         for f in dir_files:
             f_path: str = f"{d}/{f[0]}"
+            # Remove the root path since the local and remote roots are (nearly) always different.
             rel_path: str = f_path.replace(sync_info.remote_root, '')
             f_info: dict = f[1]
 
-            # Skip the entry if it's not a normal file or directory
-            # or blacklisted.
+            # Skip the entry if it's not a normal file or directory or if it's blacklisted.
             if (f_info['type'] not in {'file', 'dir'}) or (rel_path in sync_info.blacklist):
                 continue
 
@@ -256,10 +256,13 @@ def get_remote_files(ftp: ftplib.FTP, sync_info: SyncInfo, v: bool)->dict[str, F
                 scan_list.append(f_path)
                 f_is_dir = True
 
+            # Get the modified date.
             m_time = time.mktime(datetime.strptime(str(f_info['modify']), '%Y%m%d%H%M%S').timetuple())
+            # Add the file to the file list.
             files[rel_path] = FileInfo(f_path, rel_path, f[0], m_time, f_info.get('size', 0), f_is_dir)
     # Return to the root directory.
     ftp.cwd(sync_info.remote_root)
+    
     return files
 
 def get_local_files(sync_info: SyncInfo, v: bool = False)->dict[str, FileInfo]:
@@ -289,10 +292,11 @@ def get_local_files(sync_info: SyncInfo, v: bool = False)->dict[str, FileInfo]:
         
     for d in scan_list:
         if v: print(f"Changing directory to: {d}")
+        # Get files in the directory being scanned.
         results = os.scandir(d)
 
         for entry in results:
-            # Remove the local and backslashes (for Windows) so the path matches the remote one.
+            # Remove the local root and backslashes (for Windows) so the path matches the remote one.
             rel_path = entry.path.replace(sync_info.local_root, '').replace('\\', '/')
             # Ignore blacklisted paths.
             if rel_path in sync_info.blacklist:
@@ -303,30 +307,37 @@ def get_local_files(sync_info: SyncInfo, v: bool = False)->dict[str, FileInfo]:
                 continue
 
             if v: print(f"Found: {rel_path}")
+            # Add directories to the scan list.
             is_dir: bool = False
             if entry.is_dir():
                 is_dir = True
                 scan_list.append(entry.path)
 
+            # Get the file info.
             stat = entry.stat(follow_symlinks=False)
+            # Add the file info to the file list.
             files[rel_path] = FileInfo(entry.path, rel_path, entry.name, stat.st_mtime, stat.st_size, is_dir)
     return files
 
 def sync(args)->None:
     v: bool = args.verbose
+    # Load settings from the passed json file and arguments.
     info = load_connection_settings(args)
     con_info: ConnectionInfo = info[0]
     sync_info: SyncInfo = info[1]
-    ftp: ftplib.FTP = connect(con_info, sync_info.remote_root)
+    ftp: ftplib.FTP = connect(con_info)
 
+    # Get the remote and local files to be compared.
     r_files: dict[str, FileInfo] = get_remote_files(ftp, sync_info, v)
     l_files: dict[str, FileInfo] = get_local_files(sync_info, v)
-    
+
+    # These lists contain files belonging to each
+    # operation.
     f_to_down: dict[str, int] = {}
     f_to_del: list[str] = []
     d_to_down: list[str] = []
     d_to_del: list[str] = []
-    
+
     if r_files:
         # Loop through all the remote files and set any
         # files that only exist on the remote server or
@@ -351,7 +362,7 @@ def sync(args)->None:
                 continue
 
             # Download if there is a size or last-modified date difference between
-            # the local and remote files.
+            # the local and remote file.
             if f.size != l_file.size or f.m_date != l_file.m_date:
                 f_to_down[key] = f.m_date
             else:
@@ -367,18 +378,19 @@ def sync(args)->None:
         else:
             f_to_del.append(f)
 
+    # No need to continue if no operations need to be done.
     if not f_to_down and not f_to_del and not d_to_down and not d_to_del:
         print("Everything is up to date!")
         write_summary("No changes")
         sys.exit()
 
-    # Sort all the lists by how deep they are in the file structure.
+    # Sort all list items by how deep they are in the file structure.
     # This prevents the program from attempting to download files or
     # directories into paths that don't exist.
     f_to_down = dict(sorted(f_to_down.items(), key=lambda x: x[0].count('/')))
-    d_to_down.sort(key=sort_by_dir_level)
-    d_to_del.sort(key=sort_by_dir_level)
-    f_to_del.sort(key=sort_by_dir_level)
+    d_to_down.sort(key=get_dir_level)
+    d_to_del.sort(key=get_dir_level)
+    f_to_del.sort(key=get_dir_level)
 
     # Output the summary to a text file and ask for confirmation
     # before doing anything with the files.
