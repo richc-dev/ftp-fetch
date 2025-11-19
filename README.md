@@ -28,11 +28,12 @@ FTP Fetch uses JSON files in the following format to store the connection data:
     ]
 }
 ```
-### Notes:
-On Windows, use forward slashs (`/`) for all paths except `local_root`.  
+### Notes:  
 All the entries are required, but can be emtpy values.  
 The whitelist only works with directories, not files.  
 It doesn't matter whether you include starting or trailing slashes, the program will take care of that for you.  
+For Windows users:  
+- All paths MUST use forward-slashes (`/`) NOT back-slashes (`\`).  
 
 Then run the program with:  
 ```bash
