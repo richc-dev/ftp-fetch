@@ -76,10 +76,10 @@ class SyncInfo:
         self.blacklist = blacklist
         self.whitelist = whitelist
 
-def is_windows():
+def is_windows()->bool:
     return True if os.name == 'nt' else False
 
-def get_dir_level(x: str):
+def get_dir_level(x: str)->int:
     return x.count('/')
 
 def write_summary(text: str)->None:
@@ -111,7 +111,28 @@ def standardize_slashes(path: str, beginning_slash: bool = True)->str:
         return ''
     if beginning_slash:
         path = ('' if path[:1] == '/' else '/') + path
-    return path.rsplit('/', 1) if path[-1] == '/' else path
+    return path.rsplit('/', 1)[0] if path[-1] == '/' else path
+
+def generate_fileinfo_for_remote_files(sync_info: SyncInfo, parent_path: str, mlsd_info: list, v: bool = False)->tuple|None:
+    """
+    Creates a FileInfo object for remote files.
+    """
+    path: str = f"{parent_path}/{mlsd_info[0]}"
+    # Remote the root path since the local and remote roots are usually different.
+    rel_path: str = path.replace(sync_info.remote_root, '')
+    f_info: dict = mlsd_info[1]
+
+    # Return None if the entry is not a normal file or directory or if it's blacklisted.
+    if (f_info['type'] not in {'file', 'dir'}) or (rel_path in sync_info.blacklist):
+        return None
+
+    if v: print(f"Found: {rel_path}")
+    is_dir: bool = True if 'dir' == f_info['type'] else False
+
+    # Find the modified date.
+    m_date = time.mktime(datetime.strptime(str(f_info['modify']), '%Y%m%d%H%M%S').timetuple())
+    # Return a filled out FileInfo object.
+    return (rel_path, FileInfo(path, m_date, f_info.get('size', 0), is_dir))
 
 def load_connection_settings(args)->tuple:
     """
@@ -222,23 +243,44 @@ def get_remote_files(ftp: ftplib.FTP, sync_info: SyncInfo, v: bool)->dict[str, F
         scan_list = []
         # Only add whitelist entries if they exist.
         for d in sync_info.whitelist:
-            path = sync_info.remote_root + d
+            path: str = sync_info.remote_root + d
+            split_path: list = path.rsplit('/', 1)
             try:
-                ftp.cwd(path)
+                # Get the children of the parent directory.
+                parent_path_children = ftp.mlsd(split_path[0], facts=['size', 'modify', 'type'])
             except:
                 print(f"WARNING: {path} doesn't exist on the remote server!")
                 continue
-            files[d] = FileInfo(d, 0, 0, True)
-            scan_list.append(path)
+            # Check if the whitelisted path exists.
+            for f in parent_path_children:
+                if f[0] != split_path[1]:
+                    continue
+
+                file_info = generate_fileinfo_for_remote_files(sync_info, split_path[0], f, False)
+                if not file_info:
+                    continue
+                # Add the entry to the scan list if it's a directory.
+                if file_info[1].is_dir:
+                    scan_list.append(path)
+                # Add whitelist entry to the file list.
+                files[file_info[0]] = file_info[1]
 
     for d in scan_list:
-        # Set the working directory.
         if v: print(f"Changing directory to: {d}")
-        ftp.cwd(d)
 
         # Get the files in the directory.
         dir_files = ftp.mlsd(d, facts=['size', 'modify', 'type'])
         for f in dir_files:
+            file_info = generate_fileinfo_for_remote_files(sync_info, d, f, v)
+            if not file_info:
+                continue
+            # Add the entry to the scan list if it's a directory.
+            if file_info[1].is_dir:
+                scan_list.append(file_info[1].path)
+            # Add entry to the file list.
+            files[file_info[0]] = file_info[1]
+            
+            
             f_path: str = f"{d}/{f[0]}"
             # Remove the root path since the local and remote roots are (nearly) always different.
             rel_path: str = f_path.replace(sync_info.remote_root, '')
@@ -287,8 +329,11 @@ def get_local_files(sync_info: SyncInfo, v: bool = False)->dict[str, FileInfo]:
         for d in sync_info.whitelist:
             path = sync_info.local_root + d
             if os.path.exists(path):
-                files[d] = FileInfo(d, 0, 0, True)
-                scan_list.append(path)
+                # Check if the path leads to a directory.
+                is_dir = os.path.isdir(path)
+                files[d] = FileInfo(d, os.path.getmtime(path), os.path.getsize(path), is_dir)
+                # If the path is a directory, add it to the scan list.
+                if is_dir: scan_list.append(path)
         
     for d in scan_list:
         if v: print(f"Changing directory to: {d}")
