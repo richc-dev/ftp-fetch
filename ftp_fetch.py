@@ -54,13 +54,11 @@ class FileInfo:
     def __init__(
         self,
         path: str,
-        name: str,
         m_date: int = 0,
         size: int = 0,
         is_dir: bool = False
     ):
         self.path = path
-        self.name = name
         self.m_date = m_date
         self.size = int(size)
         self.is_dir = is_dir
@@ -230,7 +228,7 @@ def get_remote_files(ftp: ftplib.FTP, sync_info: SyncInfo, v: bool)->dict[str, F
             except:
                 print(f"WARNING: {path} doesn't exist on the remote server!")
                 continue
-            files[d] = FileInfo(d, d.rsplit('/', 1)[1], 0, 0, True)
+            files[d] = FileInfo(d, 0, 0, True)
             scan_list.append(path)
 
     for d in scan_list:
@@ -260,7 +258,7 @@ def get_remote_files(ftp: ftplib.FTP, sync_info: SyncInfo, v: bool)->dict[str, F
             # Get the modified date.
             m_time = time.mktime(datetime.strptime(str(f_info['modify']), '%Y%m%d%H%M%S').timetuple())
             # Add the file to the file list.
-            files[rel_path] = FileInfo(f_path, f[0], m_time, f_info.get('size', 0), f_is_dir)
+            files[rel_path] = FileInfo(f_path, m_time, f_info.get('size', 0), f_is_dir)
     # Return to the root directory.
     ftp.cwd(sync_info.remote_root)
     
@@ -289,7 +287,7 @@ def get_local_files(sync_info: SyncInfo, v: bool = False)->dict[str, FileInfo]:
         for d in sync_info.whitelist:
             path = sync_info.local_root + d
             if os.path.exists(path):
-                files[d] = FileInfo(d, d.rsplit('/', 1)[1], 0, 0, True)
+                files[d] = FileInfo(d, 0, 0, True)
                 scan_list.append(path)
         
     for d in scan_list:
@@ -318,7 +316,7 @@ def get_local_files(sync_info: SyncInfo, v: bool = False)->dict[str, FileInfo]:
             # Get the file info.
             stat = entry.stat(follow_symlinks=False)
             # Add the file info to the file list.
-            files[rel_path] = FileInfo(entry.path, entry.name, stat.st_mtime, stat.st_size, is_dir)
+            files[rel_path] = FileInfo(entry.path, stat.st_mtime, stat.st_size, is_dir)
     return files
 
 def sync(args)->None:
