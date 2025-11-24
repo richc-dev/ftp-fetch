@@ -77,15 +77,21 @@ class SyncInfo:
         self.whitelist = whitelist
 
 def is_windows()->bool:
+    """ Check if the current system is Windows. """
     return True if os.name == 'nt' else False
 
-def get_dir_level(x: str)->int:
-    return x.count('/')
+def get_dir_level(path: str)->int:
+    """ 
+    Get how many directories deep the path is
+    based on how many slashes are in it.
+    """
+    return path.count('/')
 
 def write_summary(text: str)->None:
-    """ Write to summary.txt. """
+    """ Write text to summary.txt. """
     with open("summary.txt", "w") as f:
         f.write(text)
+        f.close()
 
 def format_list_to_str(l: list)->str:
     """ Output each list item on a new line. """
@@ -116,6 +122,17 @@ def standardize_slashes(path: str, beginning_slash: bool = True)->str:
 def generate_fileinfo_for_remote_files(sync_info: SyncInfo, parent_path: str, mlsd_info: list, v: bool = False)->tuple|None:
     """
     Creates a FileInfo object for remote files.
+
+    Args:
+        sync_info: A SyncInfo object.
+        parent_path: A string containing the parent directory of the current path.
+        mlsd_info: A list with the results of the MSLD command.
+        v: A bool indicating if more info should be outputed to the console.
+    
+    Returns:
+        None if the path doesn't exist or is blacklisted, otherwise returns a tuple
+        where the first element is the path relative to the root directory and the
+        second element is a FileInfo object.
     """
     path: str = f"{parent_path}/{mlsd_info[0]}"
     # Remote the root path since the local and remote roots are usually different.
@@ -136,13 +153,15 @@ def generate_fileinfo_for_remote_files(sync_info: SyncInfo, parent_path: str, ml
 
 def load_connection_settings(args)->tuple:
     """
-    Loads the connection settings
+    Loads the connection settings.
 
     Arguments:
-        args: Arguments from the command line
+        args: Arguments from the command line.
 
     Returns:
-       tuple(ConnectionInfo, SyncInfo)
+        A tuple where the first element is a ConnectionInfo object and
+        the second is a SyncInfo object, both are filled with the relavant
+        settings specified in the commandline and config file.
     """
     path: str = args.connection_json
     try:
@@ -193,7 +212,7 @@ def connect(con_info: ConnectionInfo)->ftplib.FTP:
     Connects to the FTP server.
 
     Arguments:
-        con_info: A ConnectionInfo object
+        con_info: A ConnectionInfo object.
 
     Returns:
         A ftplib.FTP object connected to the server.
@@ -228,7 +247,7 @@ def get_remote_files(ftp: ftplib.FTP, sync_info: SyncInfo, v: bool)->dict[str, F
 
     Arguments:
         ftp: A ftplib.FTP object connected to the remote server.
-        sync_info: A SyncInfo object
+        sync_info: A SyncInfo object.
         v: A boolean indicating whether or not to display additional information.
 
     Returns:
