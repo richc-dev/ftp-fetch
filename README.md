@@ -3,7 +3,13 @@ A simple command line utility that uses FTP to make sure local files match those
 
 # Requirements
 Python 3.13 or greater.  
-The server being connected to must be running GNU/Linux and support the MLSD command.  
+The server being connected to must be running GNU/Linux and support the MLSD FTP command.  
+
+# Installation
+Run `python --version` in a terminal.  
+If you get an error saying the command doesn't exist or the displayed version is lower than the required version, install a supported version (see the Python website [python.org](https://www.python.org/) for instructions).  
+
+Once you have the supported version of Python, clone this repository or download `ftp_fetch.py`.  
 
 # Usage
 FTP Fetch uses JSON files in the following format to store the connection data:  
@@ -49,6 +55,7 @@ python ftp_fetch.py /path/to/connection_info.json
 All the entries are required, but can be emtpy values.  
 Blacklist and whitelist paths should be relative to the root directories.  
 It doesn't matter whether you include starting or trailing slashes, the program will take care of that for you.  
+Symbolic links will NOT be followed.  
 **For Windows users:**  
 All paths MUST use forward-slashes (`/`) NOT back-slashes (`\`).  
 
