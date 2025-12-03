@@ -16,7 +16,7 @@ FTP Fetch uses JSON files in the following format to store the connection data:
 ```json
 {
     "remote_connection": {
-        "host": "https://example.com",
+        "host": "example.com",
         "user": "username",
         "password": "user password",
         "tls": false,
