@@ -94,9 +94,9 @@ def write_summary(text: str)->None:
         f.close()
 
 def format_list_to_str(l: list)->str:
-    """ Output each list item on a new line. """
+    """ Output each list item on a new line in alphabetical order. """
     output: str = ""
-    for i in l:
+    for i in sorted(l):
         output += f"\n{i}"
     return output
 
