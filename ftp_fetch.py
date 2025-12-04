@@ -6,17 +6,17 @@
 # License    : MIT
 
 # Copyright (c) 2025 Richie C.
-# 
+#
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the “Software”), to deal
 # in the Software without restriction, including without limitation the rights
 # to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
 # of the Software, and to permit persons to whom the Software is furnished to do
 # so, subject to the following conditions:
-# 
+#
 # The above copyright notice and this permission notice shall be included in all
 # copies or substantial portions of the Software.
-# 
+#
 # THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
 # INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
 # PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
@@ -81,15 +81,15 @@ def is_windows()->bool:
     return True if os.name == 'nt' else False
 
 def get_dir_level(path: str)->int:
-    """ 
+    """
     Get how many directories deep the path is
     based on how many slashes are in it.
     """
     return path.count('/')
 
-def write_summary(text: str)->None:
-    """ Write text to summary.txt. """
-    with open("summary.txt", "w") as f:
+def write_summary(text: str, path: str)->None:
+    """ Write text to the summary file. """
+    with open(path, "w") as f:
         f.write(text)
         f.close()
 
@@ -128,7 +128,7 @@ def generate_fileinfo_for_remote_files(sync_info: SyncInfo, parent_path: str, ml
         parent_path: A string containing the parent directory of the current path.
         mlsd_info: A list with the results of the MSLD command.
         v: A bool indicating if more info should be outputed to the console.
-    
+
     Returns:
         None if the path doesn't exist or is blacklisted, otherwise returns a tuple
         where the first element is the path relative to the root directory and the
@@ -300,7 +300,7 @@ def get_remote_files(ftp: ftplib.FTP, sync_info: SyncInfo, v: bool)->dict[str, F
             files[file_info[0]] = file_info[1]
     # Return to the root directory.
     ftp.cwd(sync_info.remote_root)
-    
+
     return files
 
 def get_local_files(sync_info: SyncInfo, v: bool = False)->dict[str, FileInfo]:
@@ -331,7 +331,7 @@ def get_local_files(sync_info: SyncInfo, v: bool = False)->dict[str, FileInfo]:
                 files[d] = FileInfo(d, os.path.getmtime(path), os.path.getsize(path), is_dir)
                 # If the path is a directory, add it to the scan list.
                 if is_dir: scan_list.append(path)
-        
+
     for d in scan_list:
         if v: print(f"Changing directory to: {d}")
         # Get files in the directory being scanned.
@@ -368,6 +368,7 @@ def sync(args)->None:
     con_info: ConnectionInfo = info[0]
     sync_info: SyncInfo = info[1]
     ftp: ftplib.FTP = connect(con_info)
+    summary_path = f'./summary-{con_info.host}.txt' if args.separate_summary else './summary.txt';
 
     # Get the remote and local files to be compared.
     r_files: dict[str, FileInfo] = get_remote_files(ftp, sync_info, v)
@@ -423,7 +424,7 @@ def sync(args)->None:
     # No need to continue if no operations need to be done.
     if not f_to_down and not f_to_del and not d_to_down and not d_to_del:
         print("Everything is up to date!")
-        write_summary("No changes")
+        write_summary("No changes", summary_path)
         sys.exit()
 
     # Sort all list items by how deep they are in the file structure.
@@ -445,13 +446,14 @@ def sync(args)->None:
     summary += format_list_to_str(f_to_del)
     summary += format_list_to_str(d_to_del)
 
-    write_summary(summary)
+    write_summary(summary, summary_path)
 
     # Ask for confirmation if the --no-confirm flag isn't set.
     if not args.no_confirm:
         print("Would you like to apply the changes in summary.txt? (y)es/(n)o")
         if input().lower() not in {'y', 'yes'}:
             print("Sync canceled")
+            os.remove(summary_path)
             sys.exit()
 
     if v: print("Deleting marked files and directories...")
@@ -482,7 +484,7 @@ def sync(args)->None:
             if v: print(f"\rCreated dir: {path}")
         except:
             print(f"\rError creating directory: {path}")
-        
+
         print(f"\rDownloading file {i} of {down_total}", end='', flush=True)
         i += 1
 
@@ -503,15 +505,18 @@ def sync(args)->None:
         i += 1
 
     ftp.quit()
+    if args.delete_summary: os.remove(summary_path)
     print("\nSync finished")
 
 # Parser for command line args
 parser = argparse.ArgumentParser(prog='ftp_fetch')
 parser.add_argument('connection_json', metavar='connection-json', type=str, help='path to the connection info json file')
-parser.add_argument('-wl', '--whitelist', type=str, default=None, help='overwrite the config whitelist, should be a comma seperated list')
-parser.add_argument('-bl', '--blacklist', type=str, default=None, help='overwrite the config blacklist, should be a comma seperated list')
+parser.add_argument('-wl', '--whitelist', type=str, default=None, help='overwrite the config whitelist, should be a comma separated list')
+parser.add_argument('-bl', '--blacklist', type=str, default=None, help='overwrite the config blacklist, should be a comma separated list')
 parser.add_argument('-p', '--password', type=str, default=None, help='overwrite the user password in the config')
 parser.add_argument('-nc', '--no-confirm', action='store_true', help='skip the preview changes step')
+parser.add_argument('-ss', '--separate-summary', action='store_true', help='use a separate summary file for each connection')
+parser.add_argument('-ds', '--delete-summary', action='store_true', help='delete the summary file once syncing completes')
 parser.add_argument('-v', '--verbose', action='store_true', help='display more info about what the program is doing')
 parser.set_defaults(func=sync)
 

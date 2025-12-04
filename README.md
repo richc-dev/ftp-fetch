@@ -45,14 +45,16 @@ Run the program using:
 python ftp_fetch.py /path/to/connection_info.json
 ```
 **Additional commandline options:**  
-`-wl, --whitelist` A comma-seperated list of paths to overwrite the config whitelist with.  
-`-bl, --blacklist` A comma-seperated list of paths to overwrite the config blacklist with.  
+`-wl, --whitelist` A comma-separated list of paths to overwrite the config whitelist with.  
+`-bl, --blacklist` A comma-separated list of paths to overwrite the config blacklist with.  
 `-p, --password` Ovewrite the config user password, useful if you don't want to store your FTP passwords in plain text.  
 `-nc, --no-confirm` Don't ask for confirmation before applying found changes. The summary will still be writen to summary.txt.  
+`-ss, --separate-summary` Use a separate summary for each connection. For example, a connection to `example.com` would have it's summary in `summary-example.com.txt` instead of `summary.txt`.  
+`-ds, --delete-summary` Deletes the summary file once the syncing has finished.  
 `-v --verbose` Shows more information about what the program is doing.  
 
 ### Notes:  
-All the entries are required, but can be emtpy values.  
+All the entries are required, but can be empty values.  
 Blacklist and whitelist paths should be relative to the root directories.  
 It doesn't matter whether you include starting or trailing slashes, the program will take care of that for you.  
 Symbolic links will NOT be followed.  
