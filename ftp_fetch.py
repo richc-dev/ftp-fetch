@@ -298,28 +298,6 @@ def get_remote_files(ftp: ftplib.FTP, sync_info: SyncInfo, v: bool)->dict[str, F
                 scan_list.append(file_info[1].path)
             # Add entry to the file list.
             files[file_info[0]] = file_info[1]
-            
-            
-            f_path: str = f"{d}/{f[0]}"
-            # Remove the root path since the local and remote roots are (nearly) always different.
-            rel_path: str = f_path.replace(sync_info.remote_root, '')
-            f_info: dict = f[1]
-
-            # Skip the entry if it's not a normal file or directory or if it's blacklisted.
-            if (f_info['type'] not in {'file', 'dir'}) or (rel_path in sync_info.blacklist):
-                continue
-
-            if v: print(f"Found: {rel_path}")
-            # If the entry is a directory, add it to the scan list.
-            f_is_dir: bool = False
-            if ('dir' == f_info['type']):
-                scan_list.append(f_path)
-                f_is_dir = True
-
-            # Get the modified date.
-            m_time = time.mktime(datetime.strptime(str(f_info['modify']), '%Y%m%d%H%M%S').timetuple())
-            # Add the file to the file list.
-            files[rel_path] = FileInfo(f_path, m_time, f_info.get('size', 0), f_is_dir)
     # Return to the root directory.
     ftp.cwd(sync_info.remote_root)
     
